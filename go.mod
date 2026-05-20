@@ -1,9 +1,9 @@
 module cscan
 
-go 1.25.7
+go 1.26
 
 require (
-	github.com/chromedp/chromedp v0.14.2
+	github.com/chromedp/chromedp v0.15.1
 	github.com/ffuf/ffuf/v2 v2.1.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gobwas/ws v1.4.0
@@ -133,7 +133,7 @@ require (
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250908092851-c2208eb08494 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/cheggaaa/pb/v3 v3.1.7 // indirect
-	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d // indirect
+	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/cloudflare/cfssl v1.6.4 // indirect
@@ -182,7 +182,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.8.0 // indirect
 	github.com/go-git/go-git/v5 v5.17.1 // indirect
-	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e // indirect
+	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.11 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

@@ -25,6 +25,40 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// chromedp 全局持久化分配器，避免每次截图创建/销毁 Chrome 进程
+// 使用 context.Background() 确保不因外部 context 取消而触发 chromedp 内部的 close-of-closed-channel panic
+var (
+	globalAllocCtx    context.Context
+	globalAllocCancel context.CancelFunc
+	globalAllocOnce   sync.Once
+)
+
+func getGlobalAllocator() (context.Context, context.CancelFunc) {
+	globalAllocOnce.Do(func() {
+		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.Flag("headless", true),
+			chromedp.Flag("disable-gpu", false),
+			chromedp.Flag("no-sandbox", true),
+			chromedp.Flag("disable-dev-shm-usage", true),
+			chromedp.Flag("ignore-certificate-errors", true),
+			chromedp.Flag("disable-web-security", true),
+			chromedp.Flag("disable-features", "VizDisplayCompositor"),
+			chromedp.Flag("disable-background-timer-throttling", true),
+			chromedp.Flag("disable-backgrounding-occluded-windows", true),
+			chromedp.Flag("disable-renderer-backgrounding", true),
+			chromedp.Flag("force-color-profile", "srgb"),
+			chromedp.WindowSize(1920, 1080),
+			chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		)
+		if chromePath := os.Getenv("CHROME_BIN"); chromePath != "" {
+			opts = append(opts, chromedp.ExecPath(chromePath))
+		}
+		// 使用 Background context，不随任务取消而销毁分配器
+		globalAllocCtx, globalAllocCancel = chromedp.NewExecAllocator(context.Background(), opts...)
+	})
+	return globalAllocCtx, globalAllocCancel
+}
+
 // FingerprintScanner 指纹扫描器
 // 使用 assetMutex 保护对共享 asset 数据的并发访问
 type FingerprintScanner struct {
@@ -1095,40 +1129,20 @@ func (s *FingerprintScanner) getIconHash(baseUrl string) string {
 
 // takeScreenshot 使用chromedp截图
 func (s *FingerprintScanner) takeScreenshot(ctx context.Context, targetUrl string) string {
-	// 创建chromedp上下文，设置超时
-	screenshotCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-
-	// 配置chromedp选项，支持 Docker 环境中的 Chromium
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", false), // 启用GPU渲染
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("ignore-certificate-errors", true),
-		chromedp.Flag("disable-web-security", true),
-		chromedp.Flag("disable-features", "VizDisplayCompositor"),
-		chromedp.Flag("disable-background-timer-throttling", true),
-		chromedp.Flag("disable-backgrounding-occluded-windows", true),
-		chromedp.Flag("disable-renderer-backgrounding", true),
-		chromedp.Flag("force-color-profile", "srgb"),
-		chromedp.WindowSize(1920, 1080),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
-
-	// 检查环境变量中是否指定了 Chrome 路径
-	if chromePath := os.Getenv("CHROME_BIN"); chromePath != "" {
-		opts = append(opts, chromedp.ExecPath(chromePath))
+	if ctx.Err() != nil {
+		return ""
 	}
 
-	allocCtx, allocCancel := chromedp.NewExecAllocator(screenshotCtx, opts...)
-	defer allocCancel()
+	// 使用全局持久化分配器，避免每次截图创建/销毁 Chrome 进程
+	// 分配器基于 context.Background()，不会因父 context 取消而触发 chromedp 的 close-of-closed-channel panic
+	allocCtx, _ := getGlobalAllocator()
 
-	// 使用自定义日志处理器过滤 CookiePartitionKey 相关的错误
-	taskCtx, taskCancel := chromedp.NewContext(allocCtx,
+	screenshotCtx, cancel := context.WithTimeout(allocCtx, 45*time.Second)
+	defer cancel()
+
+	taskCtx, taskCancel := chromedp.NewContext(screenshotCtx,
 		chromedp.WithErrorf(func(format string, args ...interface{}) {
 			msg := fmt.Sprintf(format, args...)
-			// 忽略 CookiePartitionKey 反序列化错误（Chrome 版本兼容性问题）
 			if !strings.Contains(msg, "CookiePartitionKey") {
 				logx.Errorf(format, args...)
 			}
@@ -1140,35 +1154,26 @@ func (s *FingerprintScanner) takeScreenshot(ctx context.Context, targetUrl strin
 	var pageHeight int64
 
 	err := chromedp.Run(taskCtx,
-		// 导航到目标URL
 		chromedp.Navigate(targetUrl),
-		// 等待页面基本加载完成
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		// 等待网络空闲
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			time.Sleep(3 * time.Second)
 			return nil
 		}),
-		// 获取页面高度
 		chromedp.Evaluate(`document.body.scrollHeight`, &pageHeight),
-		// 设置视口大小以适应页面内容 (由于强求传递值，必须放在 ActionFunc 中延迟执行)
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			if pageHeight < 1080 {
 				pageHeight = 1080
 			}
 			return chromedp.EmulateViewport(1920, pageHeight).Do(ctx)
 		}),
-		// 滚动到页面顶部确保完整截图
 		chromedp.Evaluate(`window.scrollTo(0, 0)`, nil),
-		// 再次等待渲染完成
 		chromedp.Sleep(2*time.Second),
-		// 执行全屏截图
 		chromedp.FullScreenshot(&buf, 90),
 	)
 
 	if err != nil {
 		logx.Errorf("Screenshot failed for %s: %v", targetUrl, err)
-		// 如果全屏截图失败，尝试普通截图
 		err = chromedp.Run(taskCtx,
 			chromedp.Navigate(targetUrl),
 			chromedp.Sleep(5*time.Second),
@@ -1181,7 +1186,6 @@ func (s *FingerprintScanner) takeScreenshot(ctx context.Context, targetUrl strin
 	}
 
 	logx.Infof("完成使用chromedp截图: %s", targetUrl)
-	// 返回base64编码的截图
 	if len(buf) > 0 {
 		return base64.StdEncoding.EncodeToString(buf)
 	}

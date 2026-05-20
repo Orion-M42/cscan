@@ -1,6 +1,6 @@
 # ============ 编译阶段 ============
 # 使用 Debian 基础镜像，便于 ksubdomain 的 CGO+libpcap 与运行时 glibc 兼容
-FROM golang:1.25.7-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 ARG VERSION
 
