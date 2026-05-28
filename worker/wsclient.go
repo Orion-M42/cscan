@@ -262,9 +262,15 @@ func (c *WorkerWSClient) doConnect(ctx context.Context) error {
 	c.connMu.Unlock()
 	c.connected.Store(true)
 
-	// 发送认证消�?
+	// 发送认证消息
 	if err := c.authenticate(); err != nil {
-		c.conn.Close()
+		// 使用局部变量关闭，避免 c.conn 被并发的 handleReadError/Close 设为 nil
+		conn.Close()
+		c.connMu.Lock()
+		if c.conn == conn {
+			c.conn = nil
+		}
+		c.connMu.Unlock()
 		c.connected.Store(false)
 		return fmt.Errorf("authentication failed: %w", err)
 	}
@@ -328,6 +334,10 @@ func (c *WorkerWSClient) authenticate() error {
 	c.connMu.RLock()
 	conn := c.conn
 	c.connMu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("connection is nil, may have been closed")
+	}
 
 	if err := wsutil.WriteClientMessage(conn, ws.OpText, msgData); err != nil {
 		return fmt.Errorf("send auth message failed: %w", err)
