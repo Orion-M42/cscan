@@ -153,6 +153,8 @@ type WorkerWSClient struct {
 	lastPong             time.Time
 	pongMu               sync.RWMutex
 	reconnecting         atomic.Bool
+	readPaused           chan struct{} // 非 nil 时 readPump 暂停；关闭则恢复
+	readPauseMu          sync.Mutex
 	wg                   sync.WaitGroup
 }
 
@@ -248,6 +250,10 @@ func (c *WorkerWSClient) connectWithRetry(ctx context.Context, isReconnect bool)
 
 // doConnect 执行单次连接
 func (c *WorkerWSClient) doConnect(ctx context.Context) error {
+	// 暂停 readPump，防止它与 authenticate() 竞争读同一连接
+	unpause := c.pauseRead()
+	defer unpause()
+
 	// 解析WebSocket URL
 	wsURL := c.buildWSURL()
 
@@ -264,7 +270,6 @@ func (c *WorkerWSClient) doConnect(ctx context.Context) error {
 
 	// 发送认证消息
 	if err := c.authenticate(); err != nil {
-		// 使用局部变量关闭，避免 c.conn 被并发的 handleReadError/Close 设为 nil
 		conn.Close()
 		c.connMu.Lock()
 		if c.conn == conn {
@@ -417,6 +422,47 @@ func (c *WorkerWSClient) Close() {
 	c.wg.Wait()
 }
 
+// ==================== Read Pause Control ====================
+
+// pauseRead 暂停 readPump，返回恢复函数
+// 重连时调用，确保 readPump 不会与 authenticate() 竞争读同一连接
+func (c *WorkerWSClient) pauseRead() (unpause func()) {
+	c.readPauseMu.Lock()
+	ch := make(chan struct{})
+	c.readPaused = ch
+	c.readPauseMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.readPauseMu.Lock()
+			c.readPaused = nil
+			c.readPauseMu.Unlock()
+			close(ch)
+		})
+	}
+}
+
+// waitIfPaused 如果 readPump 被暂停则阻塞，直到恢复或 context/closeChan 关闭
+func (c *WorkerWSClient) waitIfPaused(ctx context.Context) bool {
+	c.readPauseMu.Lock()
+	ch := c.readPaused
+	c.readPauseMu.Unlock()
+
+	if ch == nil {
+		return true // 未暂停，继续
+	}
+
+	select {
+	case <-ch:
+		return true // 已恢复
+	case <-ctx.Done():
+		return false
+	case <-c.closeChan:
+		return false
+	}
+}
+
 // ==================== Message Pumps ====================
 
 // readPump 读取消息循环
@@ -430,6 +476,11 @@ func (c *WorkerWSClient) readPump(ctx context.Context) {
 		case <-c.closeChan:
 			return
 		default:
+		}
+
+		// 重连期间暂停读取，避免与 authenticate() 竞争读同一连接
+		if !c.waitIfPaused(ctx) {
+			return
 		}
 
 		// 使用读锁保护整个读取操作，防止竞态条�?
