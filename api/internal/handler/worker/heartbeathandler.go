@@ -32,13 +32,14 @@ type WorkerHeartbeatReq struct {
 
 // WorkerHeartbeatResp 心跳响应
 type WorkerHeartbeatResp struct {
-	Code              int    `json:"code"`
-	Msg               string `json:"msg"`
-	Status            string `json:"status"`
-	ManualStopFlag    bool   `json:"manualStopFlag"`
-	ManualReloadFlag  bool   `json:"manualReloadFlag"`
-	ManualInitEnvFlag bool   `json:"manualInitEnvFlag"`
-	ManualSyncFlag    bool   `json:"manualSyncFlag"`
+	Code               int    `json:"code"`
+	Msg                string `json:"msg"`
+	Status             string `json:"status"`
+	ManualStopFlag     bool   `json:"manualStopFlag"`
+	ManualReloadFlag   bool   `json:"manualReloadFlag"`
+	ManualInitEnvFlag  bool   `json:"manualInitEnvFlag"`
+	ManualSyncFlag     bool   `json:"manualSyncFlag"`
+	DesiredConcurrency int    `json:"desiredConcurrency,omitempty"`
 }
 
 // ==================== Heartbeat Handler ====================
@@ -91,14 +92,22 @@ func WorkerHeartbeatHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			}
 		}
 
+		// 读取期望并发数（由管理端设置，持久化无TTL），下发给Worker
+		desiredConcurrency := 0
+		desiredKey := fmt.Sprintf("cscan:worker:desired_concurrency:%s", req.WorkerName)
+		if val, err := svcCtx.RedisClient.Get(r.Context(), desiredKey).Int(); err == nil && val > 0 {
+			desiredConcurrency = val
+		}
+
 		httpx.OkJson(w, &WorkerHeartbeatResp{
-			Code:              0,
-			Msg:               "success",
-			Status:            rpcResp.Status,
-			ManualStopFlag:    rpcResp.ManualStopFlag,
-			ManualReloadFlag:  rpcResp.ManualReloadFlag,
-			ManualInitEnvFlag: rpcResp.ManualInitEnvFlag,
-			ManualSyncFlag:    rpcResp.ManualSyncFlag,
+			Code:               0,
+			Msg:                "success",
+			Status:             rpcResp.Status,
+			ManualStopFlag:     rpcResp.ManualStopFlag,
+			ManualReloadFlag:   rpcResp.ManualReloadFlag,
+			ManualInitEnvFlag:  rpcResp.ManualInitEnvFlag,
+			ManualSyncFlag:     rpcResp.ManualSyncFlag,
+			DesiredConcurrency: desiredConcurrency,
 		})
 	}
 }

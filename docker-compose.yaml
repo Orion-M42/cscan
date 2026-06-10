@@ -1,9 +1,16 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
-  # Redis 
+  # Redis
   redis:
     image: registry.cn-hangzhou.aliyuncs.com/txf7/redis:7-alpine
     container_name: cscan_redis
     command: redis-server --appendonly yes
+    logging: *default-logging
     volumes:
       - cscan_redis_data:/data
     environment:
@@ -21,6 +28,7 @@ services:
   mongodb:
     image: registry.cn-hangzhou.aliyuncs.com/txf7/mongo:6
     container_name: cscan_mongodb
+    logging: *default-logging
     volumes:
       - cscan_mongodb_data:/data/db
       - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
@@ -39,6 +47,7 @@ services:
   cscan-api:
     image: registry.cn-hangzhou.aliyuncs.com/txf7/cscan-api:latest
     container_name: cscan_api
+    logging: *default-logging
     environment:
       - TZ=Asia/Shanghai
       - GOMAXPROCS=4
@@ -74,6 +83,7 @@ services:
   cscan-rpc:
     image: registry.cn-hangzhou.aliyuncs.com/txf7/cscan-rpc:latest
     container_name: cscan_rpc
+    logging: *default-logging
     environment:
       - TZ=Asia/Shanghai
       - GOMAXPROCS=4
@@ -98,6 +108,7 @@ services:
   cscan-web:
     image: registry.cn-hangzhou.aliyuncs.com/txf7/cscan-web:latest
     container_name: cscan_web
+    logging: *default-logging
     environment:
       - TZ=Asia/Shanghai
     ports:

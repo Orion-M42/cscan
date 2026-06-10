@@ -351,6 +351,13 @@ func (l *WorkerSetConcurrencyLogic) WorkerSetConcurrency(req *types.WorkerSetCon
 		return &types.WorkerSetConcurrencyResp{Code: 404, Msg: "Worker不存在或已离线"}, nil
 	}
 
+	// 持久化期望并发数（无TTL），Worker重启后通过心跳响应恢复
+	desiredKey := fmt.Sprintf("cscan:worker:desired_concurrency:%s", req.Name)
+	if err := rdb.Set(l.ctx, desiredKey, req.Concurrency, 0).Err(); err != nil {
+		l.Logger.Errorf("[WorkerSetConcurrency] Failed to persist desired concurrency: %v", err)
+		return &types.WorkerSetConcurrencyResp{Code: 500, Msg: "保存并发数配置失败"}, nil
+	}
+
 	// 通过Pub/Sub发送设置并发数命令
 	setConcurrencyMsg := fmt.Sprintf(`{"action":"setConcurrency","workerName":"%s","concurrency":%d}`, req.Name, req.Concurrency)
 	rdb.Publish(l.ctx, "cscan:worker:control", setConcurrencyMsg)

@@ -187,13 +187,14 @@ type HeartbeatReq struct {
 
 // HeartbeatResp 心跳响应
 type HeartbeatResp struct {
-	Code              int    `json:"code"`
-	Msg               string `json:"msg"`
-	Status            string `json:"status"`
-	ManualStopFlag    bool   `json:"manualStopFlag"`
-	ManualReloadFlag  bool   `json:"manualReloadFlag"`
-	ManualInitEnvFlag bool   `json:"manualInitEnvFlag"`
-	ManualSyncFlag    bool   `json:"manualSyncFlag"`
+	Code               int    `json:"code"`
+	Msg                string `json:"msg"`
+	Status             string `json:"status"`
+	ManualStopFlag     bool   `json:"manualStopFlag"`
+	ManualReloadFlag   bool   `json:"manualReloadFlag"`
+	ManualInitEnvFlag  bool   `json:"manualInitEnvFlag"`
+	ManualSyncFlag     bool   `json:"manualSyncFlag"`
+	DesiredConcurrency int    `json:"desiredConcurrency,omitempty"`
 }
 
 // SubTaskDoneReq 子任务完成请求

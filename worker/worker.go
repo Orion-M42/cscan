@@ -53,9 +53,10 @@ type Worker struct {
 	wg         sync.WaitGroup
 	mu         sync.Mutex
 
-	taskStarted  int
-	taskExecuted int
-	isRunning    bool
+	taskStarted   int
+	taskExecuted  int
+	isRunning     bool
+	executorCount int // 已启动的任务处理协程数
 
 	// 健康状态监控
 	lastCPUCheck     time.Time // 上次CPU检查时间
@@ -421,18 +422,48 @@ func (w *Worker) handleWorkerControl(action, param string) {
 			w.logger.Error("Invalid concurrency value: %s", param)
 			return
 		}
-		w.logger.Info("Setting concurrency to: %d", newConcurrency)
-		w.config.Concurrency = newConcurrency
-		// 更新资源管理器的最大并发数
-		if w.resourceManager != nil {
-			w.resourceManager.SetMaxConcurrency(newConcurrency)
-		}
-		// 注意：增加并发数需要重启才能生效，减少并发数会在任务完成后自然生效
+		w.applyConcurrency(newConcurrency)
 		// 立即发送心跳，让服务端更新状态
 		go w.sendHeartbeat()
 	default:
 		w.logger.Warn("Unknown worker control action: %s", action)
 	}
+}
+
+// applyConcurrency 应用新的并发数：同步配置、资源管理器与自适应调度器，按需补启执行协程
+// 调小并发时由调度器限流门自然收敛，多余协程保持空闲
+func (w *Worker) applyConcurrency(newConcurrency int) {
+	if newConcurrency < 1 {
+		return
+	}
+
+	w.mu.Lock()
+	if w.config.Concurrency == newConcurrency {
+		w.mu.Unlock()
+		return
+	}
+	w.config.Concurrency = newConcurrency
+	spawn := 0
+	startId := w.executorCount
+	if w.isRunning && newConcurrency > w.executorCount {
+		spawn = newConcurrency - w.executorCount
+		w.executorCount = newConcurrency
+	}
+	w.mu.Unlock()
+
+	if w.resourceManager != nil {
+		w.resourceManager.SetMaxConcurrency(newConcurrency)
+	}
+	if w.adaptiveScheduler != nil {
+		w.adaptiveScheduler.SetMaxConcurrency(newConcurrency)
+	}
+
+	for i := 0; i < spawn; i++ {
+		w.wg.Add(1)
+		go w.processTaskWithRecovery(startId + i)
+	}
+
+	w.logger.Info("Concurrency applied: %d (spawned %d new executors)", newConcurrency, spawn)
 }
 
 // restartSelf 重新执行自身
@@ -563,6 +594,9 @@ func (w *Worker) Start() {
 		w.wg.Add(1)
 		go w.processTaskWithRecovery(i)
 	}
+	w.mu.Lock()
+	w.executorCount = w.config.Concurrency
+	w.mu.Unlock()
 
 	// 启动任务拉取协程
 	w.wg.Add(1)
@@ -3016,6 +3050,11 @@ func (w *Worker) doSendHeartbeat(ctx context.Context) error {
 			w.Stop()
 			os.Exit(0)
 		}()
+	}
+
+	// 应用管理端持久化的期望并发数（Worker重启后自动恢复，值未变化时为空操作）
+	if resp.DesiredConcurrency > 0 {
+		w.applyConcurrency(resp.DesiredConcurrency)
 	}
 
 	return nil

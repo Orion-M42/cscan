@@ -9,10 +9,17 @@
 #   CSCAN_NAME: Worker名称 (可选，默认自动生成)
 #   CSCAN_CONCURRENCY: 并发数 (可选，默认5)
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   cscan-worker:
     image: registry.cn-hangzhou.aliyuncs.com/txf7/cscan-worker:latest
     container_name: cscan-worker
+    logging: *default-logging
     restart: unless-stopped
     network_mode: host
     environment:

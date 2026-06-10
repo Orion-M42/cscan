@@ -780,6 +780,7 @@ func (s *AdaptiveScheduler) GetResourceStatus() ResourceStatus {
 }
 
 // SetMaxConcurrency 动态设置最大并发数
+// 管理端显式设置时当前并发直接对齐新值，资源紧张时由调整循环自动回落
 func (s *AdaptiveScheduler) SetMaxConcurrency(maxConcurrency int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -787,10 +788,7 @@ func (s *AdaptiveScheduler) SetMaxConcurrency(maxConcurrency int) {
 	if maxConcurrency > 0 {
 		s.config.BaseConcurrency = maxConcurrency
 		s.config.MaxConcurrency = maxConcurrency
-		// 如果当前并发数超过新的最大值，立即调整
-		if s.currentConcurrency > maxConcurrency {
-			s.currentConcurrency = maxConcurrency
-		}
+		s.currentConcurrency = maxConcurrency
 	}
 }
 
